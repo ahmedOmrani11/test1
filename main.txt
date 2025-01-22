@@ -1,23 +1,7 @@
-from picamera2 import Picamera2
-import cv2
-from ultralytics import YOLO
-import numpy as np
-import time
-
-def initialize_camera():
-    picam2 = Picamera2()
-    config = picam2.create_preview_configuration(
-        
-    )
-    picam2.configure(config)
-    picam2.start()
-    time.sleep(2)  # Camera warm-up
-    return picam2
-
 def process_frame(frame, model):
-    # Get image height for middle point calculation
-    image_height = frame.shape[0]
-    middle_y = image_height // 2
+    # Get image width for middle point calculation
+    image_width = frame.shape[1]
+    middle_x = image_width // 2
     
     # Run YOLO inference
     results = model.predict(frame, imgsz=640, conf=0.79)
@@ -29,8 +13,8 @@ def process_frame(frame, model):
     # Process detection results
     annotated_frame = frame.copy()
     
-    # Draw middle line for reference
-    cv2.line(annotated_frame, (0, middle_y), (frame.shape[1], middle_y), 
+    # Draw middle line for reference (vertical line now)
+    cv2.line(annotated_frame, (middle_x, 0), (middle_x, frame.shape[0]), 
              (255, 0, 0), 1)
     
     for result in results[0].boxes.data:
@@ -49,9 +33,9 @@ def process_frame(frame, model):
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
         # Calculate and mark middle point
-        mid_y = (y1 + y2) // 2
-        cv2.circle(annotated_frame, (x1, mid_y), 3, (0, 0, 255), -1)
-        cv2.putText(annotated_frame, f"Mid: ({x1}, {mid_y})", (x1, mid_y - 10),
+        mid_x = (x1 + x2) // 2
+        cv2.circle(annotated_frame, (mid_x, y1), 3, (0, 0, 255), -1)
+        cv2.putText(annotated_frame, f"Mid: ({mid_x}, {y1})", (mid_x + 10, y1 - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         
         # Store coordinates based on class
@@ -62,29 +46,29 @@ def process_frame(frame, model):
     
     # Calculate position if both objects are detected
     if t_x1 is not None and l_x1 is not None:
-        t_mid_y = (t_y1 + t_y2) // 2
-        l_mid_y = (l_y1 + l_y2) // 2
-        height_t = t_y2 - t_y1
+        t_mid_x = (t_x1 + t_x2) // 2
+        l_mid_x = (l_x1 + l_x2) // 2
+        width_t = t_x2 - t_x1
         
-        diff_y = l_mid_y - t_mid_y
-        percentage = (diff_y / height_t) * 100
+        diff_x = l_mid_x - t_mid_x
+        percentage = (diff_x / width_t) * 100
         
-        # Determine vertical position status
+        # Determine horizontal position status
         if percentage < 1:
-            v_status = "Above Normal Position"
-            v_color = (0, 255, 255)  # Yellow
+            h_status = "Left of Normal Position"
+            h_color = (0, 255, 255)  # Yellow
         elif percentage > 10:
-            v_status = "Below Normal Position"
-            v_color = (0, 0, 255)    # Red
+            h_status = "Right of Normal Position"
+            h_color = (0, 0, 255)    # Red
         else:
-            v_status = "Normal Position"
-            v_color = (0, 255, 0)    # Green
+            h_status = "Normal Position"
+            h_color = (0, 255, 0)    # Green
             
-        # Determine left/right position based on y2
-        h_status = "Left Side" if y2 > middle_y else "Right Side"
+        # Determine above/below position based on x2
+        v_status = "Above" if x2 < middle_x else "Below"
         
         # Determine if logo is normal or defective
-        if v_status == "Normal Position" and h_status == "Right Side":
+        if h_status == "Normal Position" and v_status == "Below":
             logo_status = "NORMAL LOGO"
             logo_color = (0, 255, 0)  # Green
         else:
@@ -92,59 +76,23 @@ def process_frame(frame, model):
             logo_color = (0, 0, 255)  # Red
         
         # Display measurements and status
-        cv2.putText(annotated_frame, f"t_mid_y: {t_mid_y}", (10, 30),
+        cv2.putText(annotated_frame, f"t_mid_x: {t_mid_x}", (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        cv2.putText(annotated_frame, f"l_mid_y: {l_mid_y}", (10, 60),
+        cv2.putText(annotated_frame, f"l_mid_x: {l_mid_x}", (10, 60),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        cv2.putText(annotated_frame, f"height_t: {height_t}", (10, 90),
+        cv2.putText(annotated_frame, f"width_t: {width_t}", (10, 90),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
         cv2.putText(annotated_frame, f"Pct: {percentage:.2f}%", (10, 120),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        cv2.putText(annotated_frame, f"V-Status: {v_status}", (10, 150),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, v_color, 2)
-        cv2.putText(annotated_frame, f"Position: {h_status}", (10, 180),
+        cv2.putText(annotated_frame, f"H-Status: {h_status}", (10, 150),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, h_color, 2)
+        cv2.putText(annotated_frame, f"Position: {v_status}", (10, 180),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
         
         # Display logo status in large text at the bottom
-        cv2.putText(annotated_frame, logo_status, (10, image_height - 20),
+        cv2.putText(annotated_frame, logo_status, (10, frame.shape[0] - 20),
                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, logo_color, 3)
         
-        print(f"Percentage Difference: {percentage:.2f}% - {v_status} - {h_status} - {logo_status}")
+        print(f"Percentage Difference: {percentage:.2f}% - {h_status} - {v_status} - {logo_status}")
     
     return annotated_frame
-
-def main():
-    try:
-        # Initialize camera
-        picam2 = initialize_camera()
-        
-        # Load YOLO model
-        model = YOLO("best.pt")
-        print("Model loaded successfully")
-        print("Starting position detection. Press 'q' to exit.")
-        
-        while True:
-            # Capture frame
-            frame = picam2.capture_array()
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # Process frame and perform detection
-            annotated_frame = process_frame(rgb_frame, model)
-            
-            # Display the frame
-            cv2.imshow("Position Detection", annotated_frame)
-            
-            # Break loop if 'q' is pressed
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-                
-    except KeyboardInterrupt:
-        print("\nExiting program...")
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-    finally:
-        # Clean up
-        picam2.stop()
-        cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    main()
