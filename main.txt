@@ -7,7 +7,7 @@ import time
 def initialize_camera():
     picam2 = Picamera2()
     config = picam2.create_preview_configuration(
-        main={"format": "RGB888", "size": (640, 480)}
+        
     )
     picam2.configure(config)
     picam2.start()
@@ -15,8 +15,12 @@ def initialize_camera():
     return picam2
 
 def process_frame(frame, model):
+    # Get image height for middle point calculation
+    image_height = frame.shape[0]
+    middle_y = image_height // 2
+    
     # Run YOLO inference
-    results = model.predict(frame, imgsz=640, conf=0.5)
+    results = model.predict(frame, imgsz=640, conf=0.79)
     
     # Initialize variables for position detection
     t_x1, t_y1, t_x2, t_y2 = None, None, None, None  # topTether coordinates
@@ -25,9 +29,13 @@ def process_frame(frame, model):
     # Process detection results
     annotated_frame = frame.copy()
     
+    # Draw middle line for reference
+    cv2.line(annotated_frame, (0, middle_y), (frame.shape[1], middle_y), 
+             (255, 0, 0), 1)
+    
     for result in results[0].boxes.data:
-        x1, y1, x2, y2, conf, cls = result
-        x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+        x1, y1, x2, y2 = map(int, result[:4])
+        conf, cls = result[4:]
         cls = int(cls)
         
         # Draw bounding box
@@ -61,16 +69,27 @@ def process_frame(frame, model):
         diff_y = l_mid_y - t_mid_y
         percentage = (diff_y / height_t) * 100
         
-        # Determine position status
+        # Determine vertical position status
         if percentage < 1:
-            status = "Above Normal Position"
-            color = (0, 255, 255)  # Yellow
+            v_status = "Above Normal Position"
+            v_color = (0, 255, 255)  # Yellow
         elif percentage > 10:
-            status = "Below Normal Position"
-            color = (0, 0, 255)    # Red
+            v_status = "Below Normal Position"
+            v_color = (0, 0, 255)    # Red
         else:
-            status = "Normal Position"
-            color = (0, 255, 0)    # Green
+            v_status = "Normal Position"
+            v_color = (0, 255, 0)    # Green
+            
+        # Determine left/right position based on y2
+        h_status = "Left Side" if y2 > middle_y else "Right Side"
+        
+        # Determine if logo is normal or defective
+        if v_status == "Normal Position" and h_status == "Right Side":
+            logo_status = "NORMAL LOGO"
+            logo_color = (0, 255, 0)  # Green
+        else:
+            logo_status = "DEFECTIVE LOGO"
+            logo_color = (0, 0, 255)  # Red
         
         # Display measurements and status
         cv2.putText(annotated_frame, f"t_mid_y: {t_mid_y}", (10, 30),
@@ -81,10 +100,16 @@ def process_frame(frame, model):
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
         cv2.putText(annotated_frame, f"Pct: {percentage:.2f}%", (10, 120),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        cv2.putText(annotated_frame, f"Status: {status}", (10, 150),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.putText(annotated_frame, f"V-Status: {v_status}", (10, 150),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, v_color, 2)
+        cv2.putText(annotated_frame, f"Position: {h_status}", (10, 180),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
         
-        print(f"Percentage Difference: {percentage:.2f}% - {status}")
+        # Display logo status in large text at the bottom
+        cv2.putText(annotated_frame, logo_status, (10, image_height - 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, logo_color, 3)
+        
+        print(f"Percentage Difference: {percentage:.2f}% - {v_status} - {h_status} - {logo_status}")
     
     return annotated_frame
 
@@ -101,9 +126,9 @@ def main():
         while True:
             # Capture frame
             frame = picam2.capture_array()
-            
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             # Process frame and perform detection
-            annotated_frame = process_frame(frame, model)
+            annotated_frame = process_frame(rgb_frame, model)
             
             # Display the frame
             cv2.imshow("Position Detection", annotated_frame)
